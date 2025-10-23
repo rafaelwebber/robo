@@ -3,8 +3,7 @@ import time, re
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.
-import Keys
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
@@ -38,38 +37,44 @@ for processo in df['numero_processo']:
         driver.find_element(By.ID, "numeroDigitoAnoUnificado").send_keys(parte1)
         driver.find_element(By.ID, "foroNumeroUnificado").send_keys(parte3)
 
-        # Clica em "Pesquisar"
+        # Clica em consultar
         driver.find_element(By.ID, "botaoConsultarProcessos").click()
         time.sleep(5)
 
-        # Extrai dados principais
+        # Extrai dados do processo
         classe = driver.find_element(By.ID, "classeProcesso").text
         assunto = driver.find_element(By.ID, "assuntoProcesso").text
         foro = driver.find_element(By.ID, "foroProcesso").text
         vara = driver.find_element(By.ID, "varaProcesso").text
         juiz = driver.find_element(By.ID, "juizProcesso").text
+        dataHora = driver.find_element(By.ID, "dataHoraDistribuicaoProcesso").text
+        controle = driver.find_element(By.ID, "numeroControleProcesso").text
+        area = driver.find_element(By.ID, "areaProcesso").text
+        valorAcao = driver.find_element(By.ID, "valorAcaoProcesso").text
+        
 
-        # Extrai partes
+        # Extrai partes envolvidas
         html_partes = driver.find_element(By.ID, "tablePartesPrincipais").get_attribute("outerHTML")
         soup_partes = BeautifulSoup(html_partes, "html.parser")
 
         requerentes = []
         devedores = []
 
-        for linha in soup_partes.find_all("tr"):
+        #percorre todas as linha de soup na tag tr e depois faz uma condição na qual palavra no texto for igual a alguma STR dento da lista ele faz um append em requerente ou devedores
+        for linha in soup_partes.find_all("tr"):#tr é uma tag HTML 
             texto = linha.get_text(separator=" ", strip=True).upper()
             if any(palavra in texto for palavra in ["REQUERENTE", "REQTE", "EXEQUENTE", "PARTE ATIVA"]):
                 requerentes.append(texto)
             elif any(palavra in texto for palavra in ["REQUERIDO", "EXECUTADO", "DEVEDOR", "PARTE PASSIVA"]):
                 devedores.append(texto)
 
-        # Extrai movimentações
+        # Extrai todas as movimentações
         html_movs = driver.find_element(By.ID, "tabelaTodasMovimentacoes").get_attribute("outerHTML")
         soup_movs = BeautifulSoup(html_movs, "html.parser")
 
         lista_movs = []
         for linha in soup_movs.find_all("tr"):
-            texto = linha.get_text(separator=" ", strip=True)
+            texto = linha.get_text(separator=" ", strip=True) #na hora de extrair o text das tags garante que em tags diferentes o texto nao fique grudado
             lista_movs.append(texto)
 
         movimentacoes_formatadas = "\n".join(lista_movs)
