@@ -7,6 +7,8 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # Lê o Excel com os números de processo
 df = pd.read_excel("C:/Users/rafae/OneDrive/Desktop/ESCRITÓRIO/robo/processos.xlsx")
@@ -20,14 +22,31 @@ def separar_numero_processo(numero_completo):
     parte3 = numero_limpo[16:]
     return parte1, parte3
 
+# Extrai dados do processo
+def extrair_texto_por_id(driver, id_elemento, timeout=10):
+    try:
+        WebDriverWait(driver, timeout).until(
+            EC.presence_of_element_located((By.ID, id_elemento))
+        )
+        elemento = driver.find_element(By.ID, id_elemento)
+        return elemento.get_attribute("innerText").strip()
+    except:
+        return None
+    
 # Configura o navegador
 options = Options()
 options.add_argument("--start-maximized")
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
+# Abre a página de login
+driver.get("https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do")
+
+# Pausa para login manual
+input("⏸️ Faça o login manualmente e pressione ENTER para continuar...")
+
 for processo in df['numero_processo']:
     print(f"processo: {processo}")
-    driver.get("https://esaj.tjsp.jus.br/cpopg/search.do?conversationId=&cbPesquisa=NUMPROC")
+    driver.get("https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do")
     time.sleep(2)
 
     try:
@@ -41,16 +60,20 @@ for processo in df['numero_processo']:
         driver.find_element(By.ID, "botaoConsultarProcessos").click()
         time.sleep(5)
 
-        # Extrai dados do processo
-        classe = driver.find_element(By.ID, "classeProcesso").text
-        assunto = driver.find_element(By.ID, "assuntoProcesso").text
-        foro = driver.find_element(By.ID, "foroProcesso").text
-        vara = driver.find_element(By.ID, "varaProcesso").text
-        juiz = driver.find_element(By.ID, "juizProcesso").text
-        dataHora = driver.find_element(By.ID, "dataHoraDistribuicaoProcesso").text
-        controle = driver.find_element(By.ID, "numeroControleProcesso").text
-        area = driver.find_element(By.ID, "areaProcesso").text
-        valorAcao = driver.find_element(By.ID, "valorAcaoProcesso").text
+        # chamada da funcao e passagem de parametros
+        classe     = extrair_texto_por_id(driver, "classeProcesso")
+        assunto    = extrair_texto_por_id(driver, "assuntoProcesso")
+        foro       = extrair_texto_por_id(driver, "foroProcesso")
+        vara       = extrair_texto_por_id(driver, "varaProcesso")
+        juiz       = extrair_texto_por_id(driver, "juizProcesso")
+        dataHora   = extrair_texto_por_id(driver, "dataHoraDistribuicaoProcesso")
+        controle   = extrair_texto_por_id(driver, "numeroControleProcesso")
+        area       = extrair_texto_por_id(driver, "areaProcesso")
+        valorAcao  = extrair_texto_por_id(driver, "valorAcaoProcesso")
+        peticoes   = extrair_texto_por_id(driver, "processoSemDiversas")
+        incidentes = extrair_texto_por_id(driver, "processoSemIncidentes")
+        apensos    = extrair_texto_por_id(driver, "dadosApensosNaoDisponiveis")
+        audiencia  = extrair_texto_por_id(driver, "processoSemAudiencias")
         
 
         # Extrai partes envolvidas
@@ -79,6 +102,16 @@ for processo in df['numero_processo']:
 
         movimentacoes_formatadas = "\n".join(lista_movs)
 
+        # Clica no link para abrir a pasta
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "linkPasta"))).click()
+
+        # Espera o botão de selecionar tudo aparecer e clica
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "selecionarButton"))).click()
+
+        # Espera o botão de salvar aparecer e clica para baixar o PDF
+        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "salvarButton"))).click()
+
+
     except Exception as e:
         print(f"Erro ao consultar {processo}: {e}")
         classe = assunto = movimentacoes_formatadas = "Erro ou não encontrado"
@@ -87,15 +120,25 @@ for processo in df['numero_processo']:
 
     resultados.append({
         "numero_processo": processo,
-        "classe": classe,
-        "assunto": assunto,
-        "foro": foro,
-        "vara": vara,
-        "juiz": juiz,
-        "requerente": ", ".join(requerentes),
-        "devedor": ", ".join(devedores),
-        "movimentacoes": movimentacoes_formatadas
+        "Classe": classe,
+        "Assunto": assunto,
+        "Foro": foro,
+        "Vara": vara,
+        "Juiz": juiz,
+        "Distribuição": dataHora,
+        "Controle": controle,
+        "Area": area,
+        "ValorAcao": valorAcao,
+        "Requerente": ", ".join(requerentes),
+        "Devedor": ", ".join(devedores),
+        "Movimentacoes": movimentacoes_formatadas,
+        "Petições diversas": peticoes,
+        "Incidentes, ações incidentais, recursos e execuções de sentenças": incidentes,
+        "Apensos, Entranhados e Unificados": apensos,
+        "Audiências": audiencia
     })
+
+    
 
 driver.quit()
 
