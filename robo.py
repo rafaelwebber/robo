@@ -1,5 +1,5 @@
 import pandas as pd
-import time, re
+import time, re, os
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -9,10 +9,12 @@ from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 
 # Lê o Excel com os números de processo
-df = pd.read_excel("C:/Users/rafae/OneDrive/Desktop/ESCRITÓRIO/robo/processos.xlsx")
+df = pd.read_excel("C:/Users/rafae/OneDrive/Desktop/robo/processos.xlsx")
 resultados = []
+pasta_download = r"G:\Drives compartilhados\Tecnologia\PDFs - Esaj TJSP"
 
 def separar_numero_processo(numero_completo):
     numero_limpo = re.sub(r"[.-]", "", numero_completo)
@@ -22,27 +24,51 @@ def separar_numero_processo(numero_completo):
     parte3 = numero_limpo[16:]
     return parte1, parte3
 
-# Extrai dados do processo
+# Extrai dados do processo que são colocados via JS
 def extrair_texto_por_id(driver, id_elemento, timeout=10):
     try:
-        WebDriverWait(driver, timeout).until(
+        elemento = WebDriverWait(driver, timeout).until(
             EC.presence_of_element_located((By.ID, id_elemento))
         )
-        elemento = driver.find_element(By.ID, id_elemento)
+        texto = elemento.text.strip()
+        if texto:
+            return texto
         return elemento.get_attribute("innerText").strip()
     except:
         return None
-    
+
+def aguardar_download(pasta, timeout=30):
+    tempo_inicial = time.time()
+    arquivos_antes = set(os.listdir(pasta))
+    while time.time() - tempo_inicial < timeout:
+        arquivos_agora = set(os.listdir(pasta))
+        novos = arquivos_agora - arquivos_antes
+        for arquivo in novos:
+            if arquivo.endswith(".pdf"):
+                print(f"PDF baixado: {arquivo}")
+                return arquivo
+        time.sleep(1)
+    print("Tempo limite atingido. Nenhum PDF encontrado.")
+    return None
+
 # Configura o navegador
 options = Options()
 options.add_argument("--start-maximized")
+prefs = {
+    "download.default_directory": pasta_download,
+    "download.prompt_for_download": False,
+    "download.directory_upgrade": True,
+    "safebrowsing.enabled": True
+}
+options.add_experimental_option("prefs", prefs)
+
 driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
 # Abre a página de login
-driver.get("https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do")
+driver.get("https://esaj.tjsp.jus.br/sajcas/login?service=https%3A%2F%2Fesaj.tjsp.jus.br%2Fcpopg%2FabrirConsultaDeRequisitorios.do")
 
 # Pausa para login manual
-input("⏸️ Faça o login manualmente e pressione ENTER para continuar...")
+input("Faça o login manualmente e pressione ENTER para continuar...")
 
 for processo in df['numero_processo']:
     print(f"processo: {processo}")
@@ -92,7 +118,7 @@ for processo in df['numero_processo']:
                 devedores.append(texto)
 
         # Extrai todas as movimentações
-        html_movs = driver.find_element(By.ID, "tabelaTodasMovimentacoes").get_attribute("outerHTML")
+        html_movs = driver.find_element(By.ID, "tabelaUltimasMovimentacoes").get_attribute("outerHTML")
         soup_movs = BeautifulSoup(html_movs, "html.parser")
 
         lista_movs = []
@@ -105,11 +131,29 @@ for processo in df['numero_processo']:
         # Clica no link para abrir a pasta
         WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "linkPasta"))).click()
 
-        # Espera o botão de selecionar tudo aparecer e clica
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "selecionarButton"))).click()
+        time.sleep(2)  # pequena pausa para garantir que a aba abriu
+        abas = driver.window_handles
+        driver.switch_to.window(abas[-1])
 
+
+        # Espera o botão de selecionar tudo aparecer e clica
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "selecionarButton"))).click()
         # Espera o botão de salvar aparecer e clica para baixar o PDF
-        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.ID, "salvarButton"))).click()
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "salvarButton"))).click()
+
+        WebDriverWait(driver, 20).until(EC.presence_of_element_located((By.ID, "opcao1")))
+        driver.find_element(By.ID, "opcao1").click()
+
+        botao_continuar = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "botaoContinuar")))
+        ActionChains(driver).move_to_element(botao_continuar).pause(1).click().perform()
+        WebDriverWait(driver, 30).until(EC.invisibility_of_element_located((By.ID, "msgAguarde")))
+
+        WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.ID, "btnDownloadDocumento"))).click()
+
+        
+
+        pdf = aguardar_download(pasta_download) 
+        caminho_pdf = os.path.join(pasta_download, pdf) if pdf else "Não baixado"
 
 
     except Exception as e:
@@ -125,7 +169,7 @@ for processo in df['numero_processo']:
         "Foro": foro,
         "Vara": vara,
         "Juiz": juiz,
-        "Distribuição": dataHora,
+        "Distribuicao": dataHora,
         "Controle": controle,
         "Area": area,
         "ValorAcao": valorAcao,
@@ -133,9 +177,10 @@ for processo in df['numero_processo']:
         "Devedor": ", ".join(devedores),
         "Movimentacoes": movimentacoes_formatadas,
         "Petições diversas": peticoes,
-        "Incidentes, ações incidentais, recursos e execuções de sentenças": incidentes,
+        "Incidentes, acoes incidentais, recursos e execucoes de sentencas": incidentes,
         "Apensos, Entranhados e Unificados": apensos,
-        "Audiências": audiencia
+        "Audiencias": audiencia,
+        "PDF": f'=HYPERLINK("{caminho_pdf}", "{caminho_pdf}")'
     })
 
     
@@ -144,4 +189,15 @@ driver.quit()
 
 # Salva os resultados em um novo Excel
 df_resultado = pd.DataFrame(resultados)
-df_resultado.to_excel("resultados_processos_selenium.xlsx", index=False)
+
+nome = "resultados_processos"
+extensao = ".xlsx"
+contador = 1
+
+while True:
+    nome_arquivo = f"{nome}_{contador}{extensao}"
+    if not os.path.exists(nome_arquivo):
+        break
+    contador += 1
+
+df_resultado.to_excel(nome_arquivo, index=False)
