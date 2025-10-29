@@ -96,6 +96,21 @@ for processo in df['numero_processo']:
         controle   = extrair_texto_por_id(driver, "numeroControleProcesso")
         area       = extrair_texto_por_id(driver, "areaProcesso")
         valorAcao  = extrair_texto_por_id(driver, "valorAcaoProcesso")
+        
+        # Extrai outros números
+        outros_numeros = None
+        try:
+            html_page = driver.page_source
+            soup_page = BeautifulSoup(html_page, "html.parser")
+            div_outros = soup_page.find("span", string=re.compile("Outros números", re.IGNORECASE))
+            if div_outros and div_outros.find_parent("div"):
+                div_pai = div_outros.find_parent("div")
+                div_conteudo = div_pai.find("div")
+                if div_conteudo:
+                    outros_numeros = div_conteudo.get_text(strip=True)
+        except:
+            outros_numeros = None
+        
         peticoes   = extrair_texto_por_id(driver, "processoSemDiversas")
         incidentes = extrair_texto_por_id(driver, "processoSemIncidentes")
         apensos    = extrair_texto_por_id(driver, "dadosApensosNaoDisponiveis")
@@ -108,14 +123,52 @@ for processo in df['numero_processo']:
 
         requerentes = []
         devedores = []
+        advogados_req = []
+        advogados_dev = []
 
-        #percorre todas as linha de soup na tag tr e depois faz uma condição na qual palavra no texto for igual a alguma STR dento da lista ele faz um append em requerente ou devedores
+        #percorre todas as linha de soup na tag tr
         for linha in soup_partes.find_all("tr"):#tr é uma tag HTML 
-            texto = linha.get_text(separator=" ", strip=True).upper()
-            if any(palavra in texto for palavra in ["REQUERENTE", "REQTE", "EXEQUENTE", "PARTE ATIVA"]):
-                requerentes.append(texto)
-            elif any(palavra in texto for palavra in ["REQUERIDO", "EXECUTADO", "DEVEDOR", "PARTE PASSIVA"]):
-                devedores.append(texto)
+            # Busca o tipo de participação (Reqte, Ent. Devedora, etc)
+            td_tipo = linha.find("td", class_="label")
+            if td_tipo:
+                span_tipo = td_tipo.find("span", class_="tipoDeParticipacao")
+                if span_tipo:
+                    tipo = span_tipo.get_text(strip=True).upper()
+                else:
+                    tipo = ""
+            else:
+                tipo = ""
+            
+            # Busca o nome da parte e advogado
+            td_nome = linha.find("td", class_="nomeParteEAdvogado")
+            if td_nome:
+                # Extrai o texto bruto
+                texto_completo = td_nome.get_text(separator=" ", strip=True)
+                
+                # Separa o nome da parte (linha principal) do advogado
+                # O nome da parte é o que vem antes de "Advogado:" ou "Advogada:"
+                partes_nome = texto_completo.split("Advogado:")
+                if len(partes_nome) > 1:
+                    nome_parte = partes_nome[0].strip()
+                    advogado_texto = "Advogado: " + partes_nome[1].strip()
+                else:
+                    partes_nome = texto_completo.split("Advogada:")
+                    if len(partes_nome) > 1:
+                        nome_parte = partes_nome[0].strip()
+                        advogado_texto = "Advogada: " + partes_nome[1].strip()
+                    else:
+                        nome_parte = texto_completo
+                        advogado_texto = None
+                
+                # Classifica baseado no tipo de participação
+                if any(palavra in tipo for palavra in ["REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA"]):
+                    requerentes.append(nome_parte)
+                    if advogado_texto:
+                        advogados_req.append(advogado_texto)
+                elif any(palavra in tipo for palavra in ["DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO", "EXECUTADO", "PARTE PASSIVA"]):
+                    devedores.append(nome_parte)
+                    if advogado_texto:
+                        advogados_dev.append(advogado_texto)
 
         # Extrai todas as movimentações
         html_movs = driver.find_element(By.ID, "tabelaUltimasMovimentacoes").get_attribute("outerHTML")
@@ -167,9 +220,10 @@ for processo in df['numero_processo']:
     except Exception as e:
         print(f"Erro ao consultar {processo}: {e}")
         classe = assunto = movimentacoes_formatadas = "Erro ou não encontrado"
-        requerentes = devedores = []
+        requerentes = devedores = advogados_req = advogados_dev = []
         foro = vara = juiz = "Erro"
         dataHora = controle = area = valorAcao = "Erro"
+        outros_numeros = "Erro"
         peticoes = incidentes = apensos = audiencia = "Erro"
         caminho_pdf = "Não baixado"
         # Fecha aba extra se aberta e volta para a original
@@ -192,8 +246,11 @@ for processo in df['numero_processo']:
         "Controle": controle,
         "Area": area,
         "ValorAcao": valorAcao,
+        "Outros numeros": outros_numeros,
         "Requerente": ", ".join(requerentes),
+        "ADVOGADOS REQUERENTE": ", ".join(advogados_req),
         "Devedor": ", ".join(devedores),
+        "ADVOGADOS DEVEDOR": ", ".join(advogados_dev),
         "Movimentacoes": movimentacoes_formatadas,
         "Petições diversas": peticoes,
         "Incidentes, acoes incidentais, recursos e execucoes de sentencas": incidentes,
