@@ -154,6 +154,14 @@ for processo in df['numero_processo']:
 
         pdf = aguardar_download(pasta_download) 
         caminho_pdf = os.path.join(pasta_download, pdf) if pdf else "Não baixado"
+        # Fecha aba aberta para a pasta e volta para a original
+        if len(driver.window_handles) > 1:
+            try:
+                driver.switch_to.window(driver.window_handles[-1])
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
+            except:
+                pass
 
 
     except Exception as e:
@@ -161,6 +169,17 @@ for processo in df['numero_processo']:
         classe = assunto = movimentacoes_formatadas = "Erro ou não encontrado"
         requerentes = devedores = []
         foro = vara = juiz = "Erro"
+        dataHora = controle = area = valorAcao = "Erro"
+        peticoes = incidentes = apensos = audiencia = "Erro"
+        caminho_pdf = "Não baixado"
+        # Fecha aba extra se aberta e volta para a original
+        if len(driver.window_handles) > 1:
+            try:
+                driver.switch_to.window(driver.window_handles[-1])
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
+            except:
+                pass
 
     resultados.append({
         "numero_processo": processo,
