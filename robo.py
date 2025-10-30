@@ -70,8 +70,8 @@ driver.get("https://esaj.tjsp.jus.br/sajcas/login?service=https%3A%2F%2Fesaj.tjs
 # Pausa para login manual
 input("Faça o login manualmente e pressione ENTER para continuar...")
 
-for processo in df['numero_processo']:
-    print(f"processo: {processo}")
+for idx, processo in enumerate(df['numero_processo'][:100], start=1):
+    print(f"Processando {idx}/100 - processo: {processo}")
     driver.get("https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do")
     time.sleep(2)
 
