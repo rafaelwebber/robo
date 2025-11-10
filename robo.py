@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+import logging
+from logging.handlers import RotatingFileHandler
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.common.exceptions import (
@@ -34,6 +36,8 @@ URL_LOGIN = (
 URL_CONSULTA = "https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do"
 MAX_PROCESSOS = 100
 TEMPO_DOWNLOAD = 90
+LOG_ARQUIVO = Path("erros_processos.log")
+logger = logging.getLogger("robo_processos")
 
 
 def carregar_processos(caminho: Path, limite: Optional[int] = None) -> List[str]:
@@ -305,6 +309,10 @@ def construir_resultado(
 
 def registrar_erro(processo: str, erro: Exception) -> Dict[str, str]:
     mensagem = f"{type(erro).__name__}: {erro}"
+    try:
+        logger.error("Falha no processo %s | %s", processo, mensagem)
+    except Exception:
+        pass
     print(f"Erro ao consultar {processo}: {mensagem}")
     return construir_resultado(
         processo=processo,
@@ -415,6 +423,21 @@ def salvar_resultados(registros: List[Dict[str, str]]):
 
 
 def main():
+    # configura logger de erros
+    logger.setLevel(logging.INFO)
+    formato = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    try:
+        handler = RotatingFileHandler(LOG_ARQUIVO, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+    except Exception:
+        handler = logging.FileHandler(LOG_ARQUIVO, encoding="utf-8")
+    handler.setLevel(logging.INFO)
+    handler.setFormatter(formato)
+    if not logger.handlers:
+        logger.addHandler(handler)
+
     processos = carregar_processos(CAMINHO_PLANILHA, MAX_PROCESSOS)
     if not processos:
         print("Nenhum número de processo encontrado na planilha.")
