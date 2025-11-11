@@ -28,21 +28,19 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 CAMINHO_PLANILHA = Path("C:/Users/rafae/OneDrive/Desktop/robo/processos.xlsx")
-PASTA_DOWNLOAD = Path("C:/Users/rafae/OneDrive/Desktop/teste")
+PASTA_DOWNLOAD = Path("G:\Drives compartilhados\Tecnologia\PDFs - Esaj TJSP")
 URL_LOGIN = (
     "https://esaj.tjsp.jus.br/sajcas/login"
     "?service=https%3A%2F%2Fesaj.tjsp.jus.br%2Fcpopg%2FabrirConsultaDeRequisitorios.do"
 )
 URL_CONSULTA = "https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do"
-MAX_PROCESSOS = 100
 TEMPO_DOWNLOAD = 90
 LOG_ARQUIVO = Path("erros_processos.log")
 logger = logging.getLogger("robo_processos")
 
-
 def carregar_processos(caminho: Path, limite: Optional[int] = None) -> List[str]:
     df = pd.read_excel(caminho)
-    serie = df["numero_processo"].dropna().astype(str)
+    serie = df["Processo"].dropna().astype(str)
     if limite:
         serie = serie.iloc[:limite]
     return serie.tolist()
@@ -114,17 +112,28 @@ def clicar_com_retentativa(
         raise ultimo_erro
 
 
-def extrair_texto_por_id(driver: Chrome, element_id: str, timeout: int = 8) -> str:
+def extrair_texto_por_id(driver, element_id, timeout = 10) -> str:
     try:
-        elemento = aguardar(driver, (By.ID, element_id), EC.presence_of_element_located, timeout)
-        texto = (elemento.text or "").strip()
-        if texto:
-            return texto
-        texto = (elemento.get_attribute("innerText") or "").strip()
-        return texto
+        # Aguarda o elemento estar presente no DOM
+        WebDriverWait(driver, timeout).until(EC.presence_of_element_located((By.ID, element_id)))
+        prazo = time.time() + timeout
+
+        while time.time() < prazo:
+            elemento = driver.find_element(By.ID, element_id)
+            texto = (elemento.text or "").strip()
+            if texto:
+                return texto
+            texto = (elemento.get_attribute("textContent") or "").strip()
+            if texto:
+                return texto
+            texto = (elemento.get_attribute("innerText") or "").strip()
+            if texto:
+                return texto
+            time.sleep(0.3)
+
+        return ""
     except TimeoutException:
         return ""
-
 
 def extrair_html(driver: Chrome, locator: Tuple[str, str], timeout: int = 10) -> str:
     try:
@@ -438,7 +447,7 @@ def main():
     if not logger.handlers:
         logger.addHandler(handler)
 
-    processos = carregar_processos(CAMINHO_PLANILHA, MAX_PROCESSOS)
+    processos = carregar_processos(CAMINHO_PLANILHA)
     if not processos:
         print("Nenhum número de processo encontrado na planilha.")
         return
