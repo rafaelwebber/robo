@@ -3,7 +3,7 @@ import re
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-
+import openpyxl
 import pandas as pd
 import logging
 from logging.handlers import RotatingFileHandler
@@ -36,6 +36,7 @@ URL_LOGIN = (
 URL_CONSULTA = "https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do"
 TEMPO_DOWNLOAD = 90
 LOG_ARQUIVO = Path("erros_processos.log")
+NOME_ARQUIVO_RESULTADOS = "resultados_processos.xlsx"
 logger = logging.getLogger("robo_processos")
 
 def carregar_processos(caminho: Path, limite: Optional[int] = None) -> List[str]:
@@ -415,20 +416,94 @@ def processar_processo(driver: Chrome, processo: str) -> Dict[str, str]:
     )
 
 
-def salvar_resultados(registros: List[Dict[str, str]]):
-    df = pd.DataFrame(registros)
-    nome_base = "resultados_processos"
-    extensao = ".xlsx"
-    contador = 1
+def obter_colunas_resultado() -> List[str]:
+    """Retorna a lista de colunas na ordem correta para o Excel."""
+    return [
+        "numero_processo",
+        "Status",
+        "Classe",
+        "Assunto",
+        "Foro",
+        "Vara",
+        "Juiz",
+        "Distribuicao",
+        "Controle",
+        "Area",
+        "ValorAcao",
+        "Outros numeros",
+        "Requerente",
+        "ADVOGADOS REQUERENTE",
+        "Devedor",
+        "ADVOGADOS DEVEDOR",
+        "Movimentacoes",
+        "Petições diversas",
+        "Incidentes, acoes incidentais, recursos e execucoes de sentencas",
+        "Apensos, Entranhados e Unificados",
+        "Audiencias",
+        "PDF",
+    ]
 
-    while True:
-        nome_arquivo = f"{nome_base}_{contador}{extensao}"
-        if not Path(nome_arquivo).exists():
-            break
-        contador += 1
 
-    df.to_excel(nome_arquivo, index=False)
-    print(f"Resultados salvos em {nome_arquivo}")
+def inicializar_arquivo_resultados(nome_arquivo: str):
+    """Cria o arquivo Excel com os cabeçalhos se não existir."""
+    if Path(nome_arquivo).exists():
+        return
+    
+    # Cria um novo workbook usando openpyxl diretamente
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    
+    # Adiciona os cabeçalhos
+    colunas = obter_colunas_resultado()
+    for col_idx, coluna in enumerate(colunas, start=1):
+        ws.cell(row=1, column=col_idx, value=coluna)
+    
+    # Salva o arquivo
+    wb.save(nome_arquivo)
+    wb.close()
+    print(f"Arquivo de resultados criado: {nome_arquivo}")
+
+
+def adicionar_resultado_ao_excel(resultado: Dict[str, str], nome_arquivo: str):
+    """Adiciona uma linha ao arquivo Excel existente."""
+    try:
+        # Carrega o workbook existente (data_only=False para preservar fórmulas)
+        wb = openpyxl.load_workbook(nome_arquivo, data_only=False)
+        ws = wb.active
+        
+        # Obtém as colunas na ordem correta
+        colunas = obter_colunas_resultado()
+        
+        # Encontra a próxima linha vazia
+        proxima_linha = ws.max_row + 1
+        
+        # Adiciona os valores na ordem das colunas
+        for col_idx, coluna in enumerate(colunas, start=1):
+            valor = resultado.get(coluna, "")
+            # Trata valores None
+            if valor is None:
+                valor = ""
+            
+            # openpyxl detecta fórmulas automaticamente quando o valor começa com "="
+            ws.cell(row=proxima_linha, column=col_idx, value=valor)
+        
+        # Salva o arquivo
+        wb.save(nome_arquivo)
+        wb.close()
+        
+    except Exception as e:
+        print(f"Erro ao salvar resultado no Excel: {e}")
+        # Fallback: usa pandas como backup
+        try:
+            if Path(nome_arquivo).exists():
+                df_existente = pd.read_excel(nome_arquivo)
+                df_novo = pd.DataFrame([resultado])
+                df_combinado = pd.concat([df_existente, df_novo], ignore_index=True)
+            else:
+                df_combinado = pd.DataFrame([resultado])
+            df_combinado.to_excel(nome_arquivo, index=False, engine='openpyxl')
+        except Exception as e2:
+            print(f"Erro no fallback ao salvar: {e2}")
 
 
 def main():
@@ -452,7 +527,9 @@ def main():
         print("Nenhum número de processo encontrado na planilha.")
         return
 
-    resultados: List[Dict[str, str]] = []
+    # Inicializa o arquivo de resultados com cabeçalhos
+    inicializar_arquivo_resultados(NOME_ARQUIVO_RESULTADOS)
+    
     driver: Optional[Chrome] = None
 
     try:
@@ -466,13 +543,16 @@ def main():
                 resultado = processar_processo(driver, processo)
             except (NoSuchElementException, TimeoutException, WebDriverException, ValueError) as erro:
                 resultado = registrar_erro(processo, erro)
-            resultados.append(resultado)
+            
+            # Salva o resultado imediatamente no Excel
+            adicionar_resultado_ao_excel(resultado, NOME_ARQUIVO_RESULTADOS)
+            print(f"Resultado salvo no Excel para o processo {processo}")
 
     finally:
         if driver:
             driver.quit()
-
-    salvar_resultados(resultados)
+    
+    print(f"\nProcessamento concluído! Todos os resultados foram salvos em {NOME_ARQUIVO_RESULTADOS}")
 
 
 if __name__ == "__main__":
