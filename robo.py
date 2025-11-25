@@ -27,8 +27,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 
-CAMINHO_PLANILHA = Path("C:/Users/rafae/OneDrive/Desktop/robo/processos.xlsx")
-PASTA_DOWNLOAD = Path("G:\Drives compartilhados\Tecnologia\PDFs - Esaj TJSP")
+CAMINHO_PLANILHA = Path("XXXXXXX")
+PASTA_DOWNLOAD = Path("XXXXXX")
 URL_LOGIN = (
     "https://esaj.tjsp.jus.br/sajcas/login"
     "?service=https%3A%2F%2Fesaj.tjsp.jus.br%2Fcpopg%2FabrirConsultaDeRequisitorios.do"
@@ -167,46 +167,100 @@ def extrair_outros_numeros(html: str) -> str:
     return texto.get_text(strip=True) if texto else ""
 
 
-def extrair_partes(html: str) -> Tuple[List[str], List[str], List[str], List[str]]:
+def extrair_partes(
+    html: str,
+) -> Tuple[List[str], List[str], List[str], List[str], Dict[str, str]]:
     if not html:
-        return [], [], [], []
+        return [], [], [], [], {}
 
     soup = BeautifulSoup(html, "html.parser")
+    tabela = soup.find("table", id="tablePartesPrincipais") or soup
+
     requerentes, devedores = [], []
     advogados_req, advogados_dev = [], []
+    partes_em_colunas: Dict[str, List[str]] = {}
+    
+    # Tipos que já são tratados separadamente (não criar colunas adicionais)
+    tipos_ignorados = {
+        "REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA",
+        "DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO", 
+        "EXECUTADO", "PARTE PASSIVA"
+    }
 
-    for linha in soup.find_all("tr"):
-        span_tipo = linha.find("span", class_="tipoDeParticipacao")
-        tipo = (span_tipo.get_text(strip=True) if span_tipo else "").upper()
-
-        td_nome = linha.find("td", class_="nomeParteEAdvogado")
-        if not td_nome:
+    for linha in tabela.find_all("tr"):
+        celulas = linha.find_all(["td", "th"])
+        if not celulas:
             continue
 
-        texto_completo = td_nome.get_text(separator=" ", strip=True)
-        nome_parte = texto_completo
-        advogado = ""
+        # Ignora linhas de cabeçalho
+        if all(celula.name == "th" for celula in celulas):
+            continue
 
-        if "Advogado:" in texto_completo:
-            partes = texto_completo.split("Advogado:", maxsplit=1)
-            nome_parte = partes[0].strip()
-            advogado = "Advogado: " + partes[1].strip()
-        elif "Advogada:" in texto_completo:
-            partes = texto_completo.split("Advogada:", maxsplit=1)
-            nome_parte = partes[0].strip()
-            advogado = "Advogada: " + partes[1].strip()
+        tds = [celula for celula in celulas if celula.name == "td"]
+        if not tds:
+            continue
 
-        if any(palavra in tipo for palavra in ["REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA"]):
-            requerentes.append(nome_parte)
-            if advogado:
-                advogados_req.append(advogado)
-        elif any(palavra in tipo for palavra in ["DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO", "EXECUTADO", "PARTE PASSIVA"]):
-            devedores.append(nome_parte)
-            if advogado:
-                advogados_dev.append(advogado)
+        # Extrai o tipo de participação
+        span_tipo = linha.find("span", class_="tipoDeParticipacao")
+        tipo_original = span_tipo.get_text(strip=True) if span_tipo else ""
+        tipo = tipo_original.upper()
 
-    return requerentes, devedores, advogados_req, advogados_dev
+        # Extrai todas as informações da linha (texto de cada célula)
+        # Mas ignora células vazias
+        informacoes_linha: List[str] = []
+        for celula in tds:
+            texto_celula = celula.get_text(separator=" ", strip=True)
+            if texto_celula:  # Só adiciona se não estiver vazio
+                informacoes_linha.append(texto_celula)
 
+        # Processa requerentes e devedores (mantém lógica original)
+        td_nome = linha.find("td", class_="nomeParteEAdvogado")
+        if td_nome:
+            texto_completo = td_nome.get_text(separator=" ", strip=True)
+            nome_parte = texto_completo
+            advogado = ""
+
+            if "Advogado:" in texto_completo:
+                partes = texto_completo.split("Advogado:", maxsplit=1)
+                nome_parte = partes[0].strip()
+                advogado = "Advogado: " + partes[1].strip()
+            elif "Advogada:" in texto_completo:
+                partes = texto_completo.split("Advogada:", maxsplit=1)
+                nome_parte = partes[0].strip()
+                advogado = "Advogada: " + partes[1].strip()
+
+            if any(palavra in tipo for palavra in ["REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA"]):
+                requerentes.append(nome_parte)
+                if advogado:
+                    advogados_req.append(advogado)
+            elif any(
+                palavra in tipo
+                for palavra in [
+                    "DEVEDOR",
+                    "DEVEDORA",
+                    "ENT. DEVEDORA",
+                    "REQUERIDO",
+                    "EXECUTADO",
+                    "PARTE PASSIVA",
+                ]
+            ):
+                devedores.append(nome_parte)
+                if advogado:
+                    advogados_dev.append(advogado)
+
+        # Para tipos adicionais (não requerente/devedor), cria colunas dinâmicas
+        if tipo_original and not any(palavra in tipo for palavra in tipos_ignorados):
+            informacoes_limpas = [info for info in informacoes_linha if info.strip()]
+            if informacoes_limpas:
+                chave_coluna = informacoes_limpas[0]
+                valor_coluna = " | ".join(informacoes_limpas[1:]) if len(informacoes_limpas) > 1 else ""
+                if chave_coluna not in partes_em_colunas:
+                    partes_em_colunas[chave_coluna] = []
+                partes_em_colunas[chave_coluna].append(valor_coluna or chave_coluna)
+    partes_em_colunas_formatadas = {
+        chave: " | ".join(valor for valor in valores if valor) for chave, valores in partes_em_colunas.items()
+    }
+    return requerentes, devedores, advogados_req, advogados_dev, partes_em_colunas_formatadas
 
 def extrair_movimentacoes(html: str) -> str:
     if not html:
@@ -284,6 +338,7 @@ def construir_resultado(
     audiencias: str,
     caminho_pdf: Optional[str],
     status: str = "OK",
+    partes_em_colunas: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
     link_pdf = (
         f'=HYPERLINK("{Path(PASTA_DOWNLOAD, caminho_pdf)}", "{Path(PASTA_DOWNLOAD, caminho_pdf)}")'
@@ -291,7 +346,7 @@ def construir_resultado(
         else "Não baixado"
     )
 
-    return {
+    resultado = {
         "numero_processo": processo,
         "Status": status,
         "Classe": classe,
@@ -315,6 +370,11 @@ def construir_resultado(
         "Audiencias": audiencias,
         "PDF": link_pdf,
     }
+
+    if partes_em_colunas:
+        resultado.update(partes_em_colunas)
+
+    return resultado
 
 
 def registrar_erro(processo: str, erro: Exception) -> Dict[str, str]:
@@ -347,6 +407,7 @@ def registrar_erro(processo: str, erro: Exception) -> Dict[str, str]:
         audiencias="Erro",
         caminho_pdf=None,
         status="ERRO",
+        partes_em_colunas={},
     )
 
 
@@ -379,17 +440,23 @@ def processar_processo(driver: Chrome, processo: str) -> Dict[str, str]:
     audiencias = extrair_texto_por_id(driver, "processoSemAudiencias")
 
     html_partes = extrair_html(driver, (By.ID, "tablePartesPrincipais"))
-    requerentes, devedores, advogados_req, advogados_dev = extrair_partes(html_partes)
+    (
+        requerentes,
+        devedores,
+        advogados_req,
+        advogados_dev,
+        partes_em_colunas,
+    ) = extrair_partes(html_partes)
 
     html_movimentacoes = extrair_html(driver, (By.ID, "tabelaUltimasMovimentacoes"))
     movimentacoes = extrair_movimentacoes(html_movimentacoes)
 
     caminho_pdf = None
-    try:
-        abrir_pasta_digital(driver)
-        caminho_pdf = baixar_pdf(driver)
-    finally:
-        fechar_abas_extras(driver)
+    #try:
+        #abrir_pasta_digital(driver)
+        #caminho_pdf = baixar_pdf(driver)
+    #finally:
+        #fechar_abas_extras(driver)
 
     return construir_resultado(
         processo=processo,
@@ -413,6 +480,7 @@ def processar_processo(driver: Chrome, processo: str) -> Dict[str, str]:
         apensos=apensos,
         audiencias=audiencias,
         caminho_pdf=caminho_pdf,
+        partes_em_colunas=partes_em_colunas,
     )
 
 
@@ -471,20 +539,36 @@ def adicionar_resultado_ao_excel(resultado: Dict[str, str], nome_arquivo: str):
         wb = openpyxl.load_workbook(nome_arquivo, data_only=False)
         ws = wb.active
         
-        # Obtém as colunas na ordem correta
-        colunas = obter_colunas_resultado()
-        
+        # Garante que os cabeçalhos base existam
+        cabecalhos_existentes = [
+            celula.value for celula in next(ws.iter_rows(min_row=1, max_row=1))
+        ]
+        colunas_base = obter_colunas_resultado()
+        colunas = [valor for valor in cabecalhos_existentes if valor]
+
+        if not colunas:
+            colunas = colunas_base.copy()
+            for idx, coluna in enumerate(colunas, start=1):
+                ws.cell(row=1, column=idx, value=coluna)
+        else:
+            for coluna_base in colunas_base:
+                if coluna_base not in colunas:
+                    colunas.append(coluna_base)
+                    ws.cell(row=1, column=len(colunas), value=coluna_base)
+
+        # Adiciona dinamicamente eventuais novas colunas provenientes das partes
+        for chave in resultado.keys():
+            if chave not in colunas:
+                colunas.append(chave)
+                ws.cell(row=1, column=len(colunas), value=chave)
+
         # Encontra a próxima linha vazia
         proxima_linha = ws.max_row + 1
-        
-        # Adiciona os valores na ordem das colunas
+
         for col_idx, coluna in enumerate(colunas, start=1):
             valor = resultado.get(coluna, "")
-            # Trata valores None
             if valor is None:
                 valor = ""
-            
-            # openpyxl detecta fórmulas automaticamente quando o valor começa com "="
             ws.cell(row=proxima_linha, column=col_idx, value=valor)
         
         # Salva o arquivo
