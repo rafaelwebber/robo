@@ -8,6 +8,7 @@ import pandas as pd
 import logging
 from logging.handlers import RotatingFileHandler
 from bs4 import BeautifulSoup
+from openpyxl.styles import Font
 from selenium import webdriver
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
@@ -177,15 +178,16 @@ def extrair_partes(
 
     soup = BeautifulSoup(html, "html.parser")
     tabela = soup.find("table", id="tablePartesPrincipais") or soup
-
     requerentes, devedores = [], []
     advogados_req, advogados_dev = [], []
-    partes_em_colunas: Dict[str, List[str]] = {}
-    
+
+    # estrutura para armazenar colunas dinâmicas: cada chave terá 'valores' e 'advogados'
+    partes_em_colunas: Dict[str, Dict[str, List[str]]] = {}
+
     # Tipos que já são tratados separadamente (não criar colunas adicionais)
     tipos_ignorados = {
         "REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA",
-        "DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO", 
+        "DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO",
         "EXECUTADO", "PARTE PASSIVA"
     }
 
@@ -208,60 +210,99 @@ def extrair_partes(
         tipo = tipo_original.upper()
 
         # Extrai todas as informações da linha (texto de cada célula)
-        # Mas ignora células vazias
         informacoes_linha: List[str] = []
         for celula in tds:
             texto_celula = celula.get_text(separator=" ", strip=True)
-            if texto_celula:  # Só adiciona se não estiver vazio
+            if texto_celula:
                 informacoes_linha.append(texto_celula)
 
-        # Processa requerentes e devedores (mantém lógica original)
+        # Processa nome e todos os advogados quando presentes
         td_nome = linha.find("td", class_="nomeParteEAdvogado")
+        nome_parte = None
+        advogados_local: List[str] = []
         if td_nome:
-            texto_completo = td_nome.get_text(separator=" ", strip=True)
-            nome_parte = texto_completo
-            advogado = ""
+            # extrai o nome como o texto antes do primeiro <br> ou antes do primeiro span de rótulo
+            nome_parts: List[str] = []
+            for item in td_nome.contents:
+                # para ao encontrar <br>
+                if getattr(item, "name", None) == "br":
+                    break
+                # para ao encontrar rótulo (ex.: <span class="mensagemExibindo">Advogado:</span>)
+                if getattr(item, "name", None) == "span" and "mensagemExibindo" in (item.get("class") or []):
+                    break
+                if isinstance(item, str):
+                    t = item.strip()
+                    if t:
+                        nome_parts.append(t)
+                else:
+                    t = item.get_text(strip=True)
+                    if t:
+                        nome_parts.append(t)
+            nome_parte = " ".join(nome_parts).strip() if nome_parts else None
 
-            if "Advogado:" in texto_completo:
-                partes = texto_completo.split("Advogado:", maxsplit=1)
-                nome_parte = partes[0].strip()
-                advogado = "Advogado: " + partes[1].strip()
-            elif "Advogada:" in texto_completo:
-                partes = texto_completo.split("Advogada:", maxsplit=1)
-                nome_parte = partes[0].strip()
-                advogado = "Advogada: " + partes[1].strip()
+            # coleta todos os advogados/advogadas listados na célula
+            for span in td_nome.find_all("span", class_="mensagemExibindo"):
+                texto_rotulo = (span.get_text() or "").strip()
+                if "ADVOGAD" in texto_rotulo.upper():
+                    # procura o próximo conteúdo relevante (pode ser texto direto ou uma tag)
+                    for sib in span.next_siblings:
+                        if isinstance(sib, str):
+                            s = sib.strip()
+                            if s:
+                                advogados_local.append(s)
+                                break
+                        else:
+                            s = sib.get_text(strip=True)
+                            if s:
+                                advogados_local.append(s)
+                                break
 
+        # Mantém lógica original para requerentes e devedores
+        if nome_parte:
             if any(palavra in tipo for palavra in ["REQTE", "REQUERENTE", "EXEQUENTE", "PARTE ATIVA"]):
                 requerentes.append(nome_parte)
-                if advogado:
-                    advogados_req.append(advogado)
-            elif any(
-                palavra in tipo
-                for palavra in [
-                    "DEVEDOR",
-                    "DEVEDORA",
-                    "ENT. DEVEDORA",
-                    "REQUERIDO",
-                    "EXECUTADO",
-                    "PARTE PASSIVA",
-                ]
-            ):
+                if advogados_local:
+                    advogados_req.extend(advogados_local)
+            elif any(palavra in tipo for palavra in [
+                "DEVEDOR", "DEVEDORA", "ENT. DEVEDORA", "REQUERIDO", "EXECUTADO", "PARTE PASSIVA",
+            ]):
                 devedores.append(nome_parte)
-                if advogado:
-                    advogados_dev.append(advogado)
+                if advogados_local:
+                    advogados_dev.extend(advogados_local)
 
         # Para tipos adicionais (não requerente/devedor), cria colunas dinâmicas
         if tipo_original and not any(palavra in tipo for palavra in tipos_ignorados):
             informacoes_limpas = [info for info in informacoes_linha if info.strip()]
             if informacoes_limpas:
                 chave_coluna = informacoes_limpas[0]
-                valor_coluna = " | ".join(informacoes_limpas[1:]) if len(informacoes_limpas) > 1 else ""
+                # Prefere o nome extraído (limpo) como valor; se não existir, usa o texto bruto das células
+                if nome_parte:
+                    valor_coluna = nome_parte
+                else:
+                    valor_coluna = " | ".join(informacoes_limpas[1:]) if len(informacoes_limpas) > 1 else ""
+
                 if chave_coluna not in partes_em_colunas:
-                    partes_em_colunas[chave_coluna] = []
-                partes_em_colunas[chave_coluna].append(valor_coluna or chave_coluna)
-    partes_em_colunas_formatadas = {
-        chave: " | ".join(valor for valor in valores if valor) for chave, valores in partes_em_colunas.items()
-    }
+                    partes_em_colunas[chave_coluna] = {"valores": [], "advogados": []}
+
+                # adiciona o valor (nome ou outras informações)
+                if valor_coluna:
+                    partes_em_colunas[chave_coluna]["valores"].append(valor_coluna)
+
+                # adiciona advogados separados, se houver
+                for a in advogados_local:
+                    if a:
+                        partes_em_colunas[chave_coluna]["advogados"].append(a)
+
+    # formata o dicionário final: cria colunas para valores e para advogados separados
+    partes_em_colunas_formatadas: Dict[str, str] = {}
+    for chave, blocos in partes_em_colunas.items():
+        valores = [v for v in blocos.get("valores", []) if v]
+        advs = [a for a in blocos.get("advogados", []) if a]
+        if valores:
+            partes_em_colunas_formatadas[chave] = " | ".join(valores)
+        if advs:
+            partes_em_colunas_formatadas[f"{chave} - Advogados"] = " | ".join(advs)
+
     return requerentes, devedores, advogados_req, advogados_dev, partes_em_colunas_formatadas
 
 def extrair_movimentacoes(html: str) -> str:
@@ -526,7 +567,8 @@ def inicializar_arquivo_resultados(nome_arquivo: str):
     # Adiciona os cabeçalhos
     colunas = obter_colunas_resultado()
     for col_idx, coluna in enumerate(colunas, start=1):
-        ws.cell(row=1, column=col_idx, value=coluna)
+        cell = ws.cell(row=1, column=col_idx, value=coluna)
+        cell.font = Font(bold=True)
     
     # Salva o arquivo
     wb.save(nome_arquivo)
@@ -556,13 +598,40 @@ def adicionar_resultado_ao_excel(resultado: Dict[str, str], nome_arquivo: str):
             for coluna_base in colunas_base:
                 if coluna_base not in colunas:
                     colunas.append(coluna_base)
-                    ws.cell(row=1, column=len(colunas), value=coluna_base)
+                    cell = ws.cell(row=1, column=len(colunas), value=coluna_base)
+                    cell.font = Font(bold=True)
 
         # Adiciona dinamicamente eventuais novas colunas provenientes das partes
-        for chave in resultado.keys():
-            if chave not in colunas:
-                colunas.append(chave)
-                ws.cell(row=1, column=len(colunas), value=chave)
+        dynamic_keys = [k for k in resultado.keys() if k not in colunas]
+        if dynamic_keys:
+            try:
+                # Se a coluna 'ADVOGADOS DEVEDOR' existir, insere as novas colunas logo depois dela
+                if "ADVOGADOS DEVEDOR" in colunas:
+                    insert_pos = colunas.index("ADVOGADOS DEVEDOR")  # 0-based index
+                    # excel insertion position is 1-based; insert after the found column
+                    excel_insert_at = insert_pos + 2
+                    for chave in dynamic_keys:
+                        # insere uma coluna vazia no arquivo para deslocar dados
+                        ws.insert_cols(excel_insert_at)
+                        cell = ws.cell(row=1, column=excel_insert_at, value=chave)
+                        cell.font = Font(bold=True)
+                        # atualiza lista de colunas em memória para refletir a nova ordem
+                        colunas.insert(insert_pos + 1, chave)
+                        insert_pos += 1
+                        excel_insert_at += 1
+                else:
+                    # fallback: anexa no final
+                    for chave in dynamic_keys:
+                        colunas.append(chave)
+                        cell = ws.cell(row=1, column=len(colunas), value=chave)
+                        cell.font = Font(bold=True)
+            except Exception:
+                # se qualquer erro ao inserir colunas, anexa no final como fallback seguro
+                for chave in dynamic_keys:
+                    if chave not in colunas:
+                        colunas.append(chave)
+                        cell = ws.cell(row=1, column=len(colunas), value=chave)
+                        cell.font = Font(bold=True)
 
         # Encontra a próxima linha vazia
         proxima_linha = ws.max_row + 1
