@@ -28,13 +28,15 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 
 CAMINHO_PLANILHA = Path("XXXXXXX")
-PASTA_DOWNLOAD = Path("XXXXXX")
+PASTA_DOWNLOAD = Path("XXXXXXX")
 URL_LOGIN = (
     "https://esaj.tjsp.jus.br/sajcas/login"
     "?service=https%3A%2F%2Fesaj.tjsp.jus.br%2Fcpopg%2FabrirConsultaDeRequisitorios.do"
 )
 URL_CONSULTA = "https://esaj.tjsp.jus.br/cpopg/abrirConsultaDeRequisitorios.do"
 TEMPO_DOWNLOAD = 90
+#GAP_ENTRE_PROCESSOS = 3  # segundos: pequena pausa entre cada processo
+#PAUSA_2_MINUTOS = 120  # segundos: pausa longa de 2 minutos entre processos
 LOG_ARQUIVO = Path("erros_processos.log")
 NOME_ARQUIVO_RESULTADOS = "resultados_processos.xlsx"
 logger = logging.getLogger("robo_processos")
@@ -631,6 +633,10 @@ def main():
             # Salva o resultado imediatamente no Excel
             adicionar_resultado_ao_excel(resultado, NOME_ARQUIVO_RESULTADOS)
             print(f"Resultado salvo no Excel para o processo {processo}")
+            # Pausa curta para estabilizar antes do próximo processo
+            #time.sleep(GAP_ENTRE_PROCESSOS)
+            # Pausa longa de 2 minutos conforme solicitado
+            #time.sleep(PAUSA_2_MINUTOS)
 
     finally:
         if driver:
