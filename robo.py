@@ -495,11 +495,11 @@ def processar_processo(driver: Chrome, processo: str) -> Dict[str, str]:
     movimentacoes = extrair_movimentacoes(html_movimentacoes)
 
     caminho_pdf = None
-    #try:
-        #abrir_pasta_digital(driver)
-        #caminho_pdf = baixar_pdf(driver)
-    #finally:
-        #fechar_abas_extras(driver)
+    try:
+        abrir_pasta_digital(driver)
+        caminho_pdf = baixar_pdf(driver)
+    finally:
+        fechar_abas_extras(driver)
 
     return construir_resultado(
         processo=processo,
@@ -677,7 +677,8 @@ def main():
     if not logger.handlers:
         logger.addHandler(handler)
 
-    processos = carregar_processos(CAMINHO_PLANILHA)
+    LIMITE_CASOS = 300
+    processos = carregar_processos(CAMINHO_PLANILHA, limite=LIMITE_CASOS)
     if not processos:
         print("Nenhum número de processo encontrado na planilha.")
         return
@@ -686,6 +687,7 @@ def main():
     inicializar_arquivo_resultados(NOME_ARQUIVO_RESULTADOS)
     
     driver: Optional[Chrome] = None
+    processos_processados = []
 
     try:
         driver = inicializar_driver()
@@ -694,6 +696,7 @@ def main():
 
         for indice, processo in enumerate(processos, start=1):
             print(f"Processando {indice}/{len(processos)} - processo: {processo}")
+            processos_processados.append(processo)
             try:
                 resultado = processar_processo(driver, processo)
             except (NoSuchElementException, TimeoutException, WebDriverException, ValueError) as erro:
@@ -710,6 +713,17 @@ def main():
     finally:
         if driver:
             driver.quit()
+        
+        # Remove os processos processados do arquivo processos.xlsx
+        if processos_processados:
+            try:
+                df = pd.read_excel(CAMINHO_PLANILHA)
+                df_original = df.copy()
+                df = df[~df["Processo"].astype(str).isin(processos_processados)]
+                df.to_excel(CAMINHO_PLANILHA, index=False)
+                print(f"\n{len(processos_processados)} processos removidos do arquivo processos.xlsx")
+            except Exception as e:
+                print(f"Erro ao remover processos do arquivo: {e}")
     
     print(f"\nProcessamento concluído! Todos os resultados foram salvos em {NOME_ARQUIVO_RESULTADOS}")
 
