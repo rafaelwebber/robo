@@ -5,6 +5,7 @@ import pytesseract
 from pdf2image import convert_from_path
 import openpyxl
 import unicodedata
+import pandas as pd
 
 # >>> Ajuste aqui para o caminho da pasta bin do Poppler <<<
 POPPLER_PATH = r"C:\Users\rafae\Downloads\Release-25.11.0-0\poppler-25.11.0\Library\bin"
@@ -293,7 +294,7 @@ def atualizar_excel_iterativo(caminho_excel, pasta_pdfs):
 
 
 # Exemplo de uso
-pasta_pdfs = r"xxxx"
-caminho_excel = r"xxxx"
+pasta_pdfs = r"G:\Drives compartilhados\Tecnologia\PDFs - Esaj TJSP"
+caminho_excel = r"C:\Users\rafae\OneDrive\Desktop\robo\resultados_processo_final.xlsx"
 
 atualizar_excel_iterativo(caminho_excel, pasta_pdfs)
